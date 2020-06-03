@@ -214,18 +214,6 @@ Visibility getVisibility(Camera* cam, const AxisAlignedBox& bound) {
         return PARTIAL;
 }
 
-void trav(KDNode* n) {
-    if (n != nullptr) {
-        if (n->left != nullptr && n->right != nullptr)
-            printf("num:%d\n", n->num);
-        else {
-            trav(n->left);
-            trav(n->right);
-        }
-    }
-}
-
-
 class BasicTutorial1
     : public ApplicationContext
     , public InputListener
