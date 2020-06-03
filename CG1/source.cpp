@@ -12,6 +12,9 @@
 #include <vector>
 #include <fstream>
 #include <ois/OIS.h>
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
 
 using namespace Ogre;
 using namespace OgreBites;
@@ -461,6 +464,8 @@ void BasicTutorial1::setup()
 
 int main(int argc, char** argv)
 {
+   
+
     try
     {
         BasicTutorial1 app;
