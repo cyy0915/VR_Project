@@ -12,9 +12,13 @@
 #include <vector>
 #include <fstream>
 #include <ois/OIS.h>
+#include <thread>
+#include <mutex>
 
 using namespace Ogre;
 using namespace OgreBites;
+
+std::mutex data_mutex;
 
 struct pointCloud {
     Vector3 position;
@@ -53,6 +57,41 @@ bool y_cmp(pointCloud p1, pointCloud p2) {
 bool z_cmp(pointCloud p1, pointCloud p2) {
     return p1.position.z < p2.position.z;
 }
+
+
+bool getDataThread(Camera* cam, const KDNode* node, std::vector<std::pair<pointCloud*, int>>* data) {
+	Visibility v = getVisibility(cam, node->aabb);
+	if (v == FULL) {
+        std::lock_guard<std::mutex> guard(data_mutex);
+		data->push_back(std::pair<pointCloud*, int>(node->list, node->num));
+		std::cout << "full\n";
+		return true;
+	}
+	else if (v == PARTIAL) {
+		std::cout << "partial\n";
+		if (node->left)
+			getDataThread(cam, node->left, data);
+		if (node->right)
+			getDataThread(cam, node->right, data);
+		if (!node->left && !node->right) {
+			pointCloud* tmpData = new pointCloud[node->num];
+			int tmpNum = 0;
+			for (int i = 0; i < node->num; ++i) {
+				if (cam->isVisible(node->list[i].position))
+					tmpData[tmpNum++] = node->list[i];
+			}
+			pointCloud* tmpData1 = new pointCloud[tmpNum];
+			for (int i = 0; i < tmpNum; ++i) {
+				tmpData1[i] = tmpData[i];
+			}
+			delete[] tmpData;
+            std::lock_guard<std::mutex> guard(data_mutex);
+            data->push_back(std::pair<pointCloud*, int>(tmpData1, tmpNum));
+		}
+	}
+	return false;
+}
+
 class KDTree {
 public:
     KDNode* root;
@@ -99,8 +138,16 @@ public:
     }
     std::pair<pointCloud*, int> getData(Camera* cam) {
         std::vector<std::pair<pointCloud*, int>> data;
-        cam->setFOVy(Degree(60));
-        getDataImp(cam, root, data);
+        //cam->setFOVy(Degree(60));
+        //getDataImp(cam, root, data);
+        std::thread th1(getDataThread, cam, root->left->left, &data);
+        std::thread th2(getDataThread, cam, root->left->right, &data);
+        std::thread th3(getDataThread, cam, root->right->left, &data);
+        std::thread th4(getDataThread, cam, root->right->right, &data);
+        th1.join();
+        th2.join();
+        th3.join();
+        th4.join();
         std::vector<std::pair<pointCloud*, int>>::iterator it;
         int tmpNum = 0;
         for (it = data.begin(); it != data.end(); ++it) {
