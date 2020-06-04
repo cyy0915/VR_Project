@@ -27,6 +27,7 @@ bld/
 [Oo]bj/
 [Ll]og/
 
+# ogre等杂项, obj模型例外在最后
 CMake/
 Media/
 include/
@@ -35,8 +36,6 @@ share/
 *.sln
 *.vcxproj
 *.vcxproj.filters
-!Pasha_guard_head.obj
-!Centurion_helmet.obj
 
 *.props
 # Visual Studio 2015/2017 cache/options directory
@@ -350,3 +349,7 @@ ASALocalRun/
 
 # BeatPulse healthcheck temp database
 healthchecksdb
+
+#obj模型例外
+!Pasha_guard_head.obj
+!Centurion_helmet.obj
