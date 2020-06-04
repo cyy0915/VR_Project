@@ -20,13 +20,18 @@
 using namespace Ogre;
 using namespace OgreBites;
 
-struct pointCloud {
+struct point {
+    Vector3 pos;
+    Vector3 uv;
+};
+struct triangle {
+    std::vector<point> node;
     Vector3 position;
-    Vector3 color;
 };
 
+
 struct KDNode {
-    pointCloud* list;
+    triangle* list;
     int num;
     AxisAlignedBox aabb;
     KDNode* left;
@@ -48,13 +53,13 @@ enum Visibility
 
 Visibility getVisibility(Camera* cam, const AxisAlignedBox& bound);
 
-bool x_cmp(pointCloud p1, pointCloud p2) {
+bool x_cmp(triangle p1, triangle p2) {
     return p1.position.x < p2.position.x;
 }
-bool y_cmp(pointCloud p1, pointCloud p2) {
+bool y_cmp(triangle p1, triangle p2) {
     return p1.position.y < p2.position.y;
 }
-bool z_cmp(pointCloud p1, pointCloud p2) {
+bool z_cmp(triangle p1, triangle p2) {
     return p1.position.z < p2.position.z;
 }
 class KDTree {
@@ -63,16 +68,16 @@ public:
     int maxDepth;
     int maxNumPerBox;
     int tmpCount;
-    pointCloud* list;
+    triangle* list;
     int num;
     KDTree() : root(nullptr), maxDepth(10), maxNumPerBox(100), tmpCount(0), list(nullptr), num(0) {};
-    KDTree(pointCloud* list, int num, int maxD = 10, int maxN = 100) {
+    KDTree(triangle* list, int num, int maxD = 10, int maxN = 100) {
         maxDepth = maxD;
         maxNumPerBox = maxN;
         tmpCount = 0;
         this->num = num;
-        this->list = new pointCloud[num];
-        memcpy(this->list, list, num * sizeof(pointCloud));
+        this->list = new triangle[num];
+        memcpy(this->list, list, num * sizeof(triangle));
         buildTree(this->list, num);
     }
     ~KDTree() {
@@ -80,7 +85,7 @@ public:
         if (list)
             delete[] list;
     }
-    bool buildTree(pointCloud* list, int num) {
+    bool buildTree(triangle* list, int num) {
         Vector3 minV = Vector3(FLT_MAX, FLT_MAX, FLT_MAX);
         Vector3 maxV = Vector3(-FLT_MAX, -FLT_MAX, -FLT_MAX);
         for (int i = 0; i < num; ++i) {
@@ -101,26 +106,26 @@ public:
         destroyTree(node->right);
         delete node;
     }
-    std::pair<pointCloud*, int> getData(Camera* cam) {
-        std::vector<std::pair<pointCloud*, int>> data;
+    std::pair<triangle*, int> getData(Camera* cam) {
+        std::vector<std::pair<triangle*, int>> data;
         cam->setFOVy(Degree(60));
         getDataImp(cam, root, data);
-        std::vector<std::pair<pointCloud*, int>>::iterator it;
+        std::vector<std::pair<triangle*, int>>::iterator it;
         int tmpNum = 0;
         for (it = data.begin(); it != data.end(); ++it) {
             tmpNum += it->second;
         }
-        pointCloud* rtnData = new pointCloud[tmpNum];
-        pointCloud* tmpHead = rtnData;
+        triangle* rtnData = new triangle[tmpNum];
+        triangle* tmpHead = rtnData;
         for (it = data.begin(); it != data.end(); ++it) {
-            memcpy(tmpHead, it->first, it->second * sizeof(pointCloud));
+            memcpy(tmpHead, it->first, it->second * sizeof(triangle));
             tmpHead += it->second;
         }
         cam->setFOVy(Degree(45));
-        return std::pair<pointCloud*, int>(rtnData, tmpNum);
+        return std::pair<triangle*, int>(rtnData, tmpNum);
     }
 private:
-    bool buildTreeImp(KDNode*& node, pointCloud* list, int num, AxisAlignedBox& box, int depth) {
+    bool buildTreeImp(KDNode*& node, triangle* list, int num, AxisAlignedBox& box, int depth) {
         node = new KDNode();
         node->list = list;
         node->num = num;
@@ -159,10 +164,10 @@ private:
             && buildTreeImp(node->right, list + (num / 2), num - num / 2, rBox, depth + 1))
             return true;
     }
-    bool getDataImp(Camera* cam, const KDNode* node, std::vector<std::pair<pointCloud*, int>>& data) {
+    bool getDataImp(Camera* cam, const KDNode* node, std::vector<std::pair<triangle*, int>>& data) {
         Visibility v = getVisibility(cam, node->aabb);
         if (v == FULL) {
-            data.push_back(std::pair<pointCloud*, int>(node->list, node->num));
+            data.push_back(std::pair<triangle*, int>(node->list, node->num));
             std::cout << "full\n";
             return true;
         }
@@ -173,18 +178,18 @@ private:
             if (node->right)
                 getDataImp(cam, node->right, data);
             if (!node->left && !node->right) {
-                pointCloud* tmpData = new pointCloud[node->num];
+                triangle* tmpData = new triangle[node->num];
                 int tmpNum = 0;
                 for (int i = 0; i < node->num; ++i) {
                     if (cam->isVisible(node->list[i].position))
                         tmpData[tmpNum++] = node->list[i];
                 }
-                pointCloud* tmpData1 = new pointCloud[tmpNum];
+                triangle* tmpData1 = new triangle[tmpNum];
                 for (int i = 0; i < tmpNum; ++i) {
                     tmpData1[i] = tmpData[i];
                 }
                 delete[] tmpData;
-                data.push_back(std::pair<pointCloud*, int>(tmpData1, tmpNum));
+                data.push_back(std::pair<triangle*, int>(tmpData1, tmpNum));
             }
         }
         return false;
@@ -241,16 +246,16 @@ public:
     void setup();
     bool frameStarted(const FrameEvent& evt) {
         ApplicationContext::frameStarted(evt);
-        count=(count + 1)%60;
+        count = (count + 1) % 60;
         if (count == 0) {
             time = getRoot()->getTimer()->getMilliseconds();
         }
 
         m_Mouse->capture();
         OIS::MouseState mousePos = m_Mouse->getMouseState();
-        
+
         x += mousePos.X.rel; y += mousePos.Y.rel;
-        float rotateSpeed = 90/300.0;
+        float rotateSpeed = 90 / 300.0;
         camNode->resetOrientation(); camNode->setDirection(front, Node::TS_WORLD);
         camNode->yaw(-Degree(rotateSpeed * x));
         camNode->pitch(-Degree(rotateSpeed * y));
@@ -281,19 +286,20 @@ public:
         }
 
         if (m_Keyboard->isKeyDown(OIS::KC_C)) {
-            std::pair<pointCloud*, int> p = kdTree->getData(cam);
-            // std::cout << "finished\n";
-             //printf("count: %d\n", p.second);
-            clouds->clear();
-            clouds->begin("largePoint", RenderOperation::OT_POINT_LIST);
+            std::pair<triangle*, int> p = kdTree->getData(cam);
+            object->clear();
+            object->begin("projectFace", RenderOperation::OT_TRIANGLE_LIST);
             for (int i = 0; i < p.second; ++i) {
-                clouds->position(p.first[i].position);
-                clouds->colour(p.first[i].color.x / 255.0, p.first[i].color.y / 255.0, p.first[i].color.z / 255.0);
+                for (int j = 0; j < 3; j++) {
+                    object->position(p.first[i].node[j].pos);
+                    object->textureCoord(p.first[i].node[j].uv);
+                }
             }
-            clouds->end();
+            object->end();
             ogreNode->detachAllObjects();
-            ogreNode->attachObject(clouds);
-            panel->setParamValue("pointNum", std::to_string(p.second));
+            ogreNode->attachObject(object);
+            panel->setParamValue("faceNum", std::to_string(p.second));
+
         }
 
         return true;
@@ -302,14 +308,14 @@ public:
         ApplicationContext::frameEnded(evt);
         if (count == 59) {
             float renderTime = (getRoot()->getTimer()->getMilliseconds() - time) / 60.0;
-            panel->setParamValue("render time per frame", "\n"+std::to_string(renderTime) + "ms");
+            panel->setParamValue("render time per frame", "\n" + std::to_string(renderTime) + "ms");
         }
         return true;
     }
 private:
     bool flag = true;
     SceneNode* ogreNode;
-    float time=0;
+    float time = 0;
     ParamsPanel* panel;
     int count = 0;
     OIS::Mouse* m_Mouse;
@@ -318,7 +324,7 @@ private:
     Camera* cam;
     int x = 0, y = 0;
     Vector3 front, up;
-    ManualObject* clouds;
+    ManualObject* object;
     KDTree* kdTree;
 };
 
@@ -356,92 +362,78 @@ void BasicTutorial1::setup()
     camNode->setDirection(Vector3(0, 1, 0), Node::TS_WORLD);
     camNode->setInitialState();
     front = Vector3(0, 1, 0); up = Vector3(0, 0, 1);
-   
+
     // and tell it to render into the main window
     Viewport* vp = getRenderWindow()->addViewport(cam);
     //! [camera]
     vp->setBackgroundColour(ColourValue::Black);
-    
+
     //ui
-    mTrayMgr->showFrameStats(TL_TOPLEFT); std::vector<std::string> a;
-    a.push_back("pointNum"); a.push_back("render time per frame"); a.push_back("");
+    mTrayMgr->showFrameStats(TL_TOPLEFT); mTrayMgr->toggleAdvancedFrameStats();
+    std::vector<std::string> a;
+    a.push_back("faceNum"); a.push_back("render time per frame"); a.push_back("");
     panel = mTrayMgr->createParamsPanel(TL_TOPLEFT, "time", 200, a);
 
-    //cloud
-    /*ogreNode = scnMgr->getRootSceneNode()->createChildSceneNode();
-    ManualObject* pointCloud = scnMgr->createManualObject();
-    pointCloud->begin("BaseWhiteNoLighting", RenderOperation::OT_POINT_LIST);
-    std::ifstream file("Pasha_guard_head400K.txt");
-    std::string tmp;
-    std::getline(file, tmp); std::getline(file, tmp);
-    int lineNumber = std::atoi(tmp.c_str()); p->setParamValue("pointNum", std::to_string(lineNumber));
-    while (std::getline(file, tmp)) {
-        float ntmp[6];
-        for (int i = 0; i < 5; i++) {
-            int pos = tmp.find(' ');
-            ntmp[i] = std::atof(tmp.substr(0, pos).c_str());
-            tmp = tmp.substr(pos + 1, tmp.size());
+    //mesh
+    std::string objectFile[2] = { std::string("face_obj/Pasha_guard_head.obj"), std::string("Centurion_helmet_obj/Centurion_helmet.obj") };
+    Assimp::Importer importer;
+    const aiScene* scene = importer.ReadFile(objectFile[0], aiProcess_Triangulate | aiProcess_FlipUVs);
+    count = 0;
+    for (int i = 0; i < scene->mNumMeshes; i++) {
+        count += scene->mMeshes[i]->mNumFaces;
+    }
+    triangle* faces = new triangle[count];
+    //std::vector<triangle> faces;
+    int tmpcount = 0;
+    for (int i = 0; i < scene->mNumMeshes; i++) {
+        for (int j = 0; j < scene->mMeshes[i]->mNumFaces; j++) {
+            triangle face;
+            for (int k = 0; k < 3; k++) {
+                int index = scene->mMeshes[i]->mFaces[j].mIndices[k];
+                Vector3 pos;
+                pos.x = scene->mMeshes[i]->mVertices[index].x;
+                pos.y = scene->mMeshes[i]->mVertices[index].y;
+                pos.z = scene->mMeshes[i]->mVertices[index].z;
+                Vector3 uv;
+                uv.x = scene->mMeshes[i]->mTextureCoords[0][index].x;
+                uv.y = scene->mMeshes[i]->mTextureCoords[0][index].y;
+                uv.z = scene->mMeshes[i]->mTextureCoords[0][index].z;
+                point node; node.pos = pos; node.uv = uv;
+                face.node.push_back(node);
+            }
+            face.position = (face.node[0].pos + face.node[1].pos + face.node[2].pos) / 3.0;
+            faces[tmpcount] = face;
+            tmpcount++;
         }
-        ntmp[5] = std::atof(tmp.c_str());
-        pointCloud->position(Vector3(ntmp[0], ntmp[1], ntmp[2])); 
-        pointCloud->colour(ntmp[3]/255, ntmp[4]/255, ntmp[5]/255);
     }
-    pointCloud->end();
-    ogreNode->attachObject(pointCloud);*/
-    char line[1000];
-    std::string fileName = "Pasha_guard_head400K.txt";
-    std::ifstream fIn(fileName);
-    if (!fIn.is_open()) {
-        std::cerr << "fail to open model file: " << fileName << std::endl;
-        return;
-    }
-    fIn.getline(line, 1000);
-    std::cout << line << std::endl;
-    fIn.getline(line, 1000);
-    int count = atoi(line);
-    if (count <= 0) {
-        std::cerr << "no point data!\n";
-        return;
-    }
-    pointCloud* data = new pointCloud[count];
-    int i = 0;
-    Vector3 boundingMin = Vector3(FLT_MAX);
-    Vector3 boundingMax = Vector3(-FLT_MAX);
-    while (i < count) {
-        fIn.getline(line, 1000);
-        std::stringstream ss(line);
-        ss >> data[i].position[0] >> data[i].position[1] >> data[i].position[2];
-        ss >> data[i].color[0] >> data[i].color[1] >> data[i].color[2];
-        for (int j = 0; j < 3; ++j) {
-            boundingMax[j] = boundingMax[j] > data[i].position[j] ? boundingMax[j] : data[i].position[j];
-            boundingMin[j] = boundingMin[j] < data[i].position[j] ? boundingMin[j] : data[i].position[j];
-        }
-        ++i;
-    }
-    std::cout << boundingMax << boundingMin;
-    for (int i = 0; i < 3; ++i) {
-        boundingMax[i] += 1;
-        boundingMin[i] -= 1;
-    }
-    AxisAlignedBox box(boundingMin, boundingMax);
-    kdTree = new KDTree(data, count);
-    clouds = scnMgr->createManualObject();
+    kdTree = new KDTree(faces, count);
+    object = scnMgr->createManualObject();
     ogreNode = scnMgr->getRootSceneNode()->createChildSceneNode();
-    std::pair<pointCloud*, int> p = kdTree->getData(cam);
-    // std::cout << "finished\n";
-     //printf("count: %d\n", p.second);
-    clouds->clear();
-    clouds->begin("largePoint", RenderOperation::OT_POINT_LIST);
+    std::pair<triangle*, int> p = kdTree->getData(cam);
+    //material
+    aiString str;
+    scene->mMaterials[scene->mMeshes[0]->mMaterialIndex]->GetTexture(aiTextureType_DIFFUSE, 0, &str);
+    //std::string textureFile = std::string("face_obj/")+std::string(str.C_Str());
+    MaterialPtr material = MaterialManager::getSingleton().create("projectFace1", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+    material->setReceiveShadows(false);
+    Pass* pass = material->getTechnique(0)->getPass(0);
+    pass->setLightingEnabled(false);
+    pass->createTextureUnitState()->setTextureName(str.C_Str());
+    object->clear();
+    object->begin(material, RenderOperation::OT_TRIANGLE_LIST);
     for (int i = 0; i < p.second; ++i) {
-        clouds->position(p.first[i].position);
-        clouds->colour(p.first[i].color.x / 255.0, p.first[i].color.y / 255.0, p.first[i].color.z / 255.0);
+        for (int j = 0; j < 3; j++) {
+            object->position(p.first[i].node[j].pos);
+            object->textureCoord(p.first[i].node[j].uv);    
+        }
     }
-    clouds->end();
+    object->end();
     ogreNode->detachAllObjects();
-    ogreNode->attachObject(clouds);
-    panel->setParamValue("pointNum", std::to_string(p.second));
+    ogreNode->attachObject(object);
+    panel->setParamValue("faceNum", std::to_string(p.second));
+    
 
-
+    //ui
     OIS::ParamList pl;
     size_t windowHnd = 0;
     std::ostringstream windowHndStr;
@@ -463,19 +455,9 @@ void BasicTutorial1::setup()
     ms.height = height;
 }
 
-struct point {
-    Vector3 pos;
-    Vector3 uv;
-};
-struct triangle {
-    std::vector<point> node;
-    Vector3 position;
-};
-
 
 int main(int argc, char** argv)
 {
-
     try
     {
         BasicTutorial1 app;
@@ -483,7 +465,7 @@ int main(int argc, char** argv)
         app.getRoot()->startRendering();
         app.closeApp();
     }
-    catch (const std::exception & e)
+    catch (const std::exception& e)
     {
         std::cerr << "Error occurred during execution: " << e.what() << '\n';
         return 1;
