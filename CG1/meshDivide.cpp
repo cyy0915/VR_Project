@@ -20,6 +20,8 @@
 using namespace Ogre;
 using namespace OgreBites;
 
+std::mutex data_mutex;
+
 struct point {
     Vector3 pos;
     Vector3 uv;
@@ -28,7 +30,6 @@ struct triangle {
     std::vector<point> node;
     Vector3 position;
 };
-
 
 struct KDNode {
     triangle* list;
@@ -62,6 +63,41 @@ bool y_cmp(triangle p1, triangle p2) {
 bool z_cmp(triangle p1, triangle p2) {
     return p1.position.z < p2.position.z;
 }
+
+
+bool getDataThread(Camera* cam, const KDNode* node, std::vector<std::pair<triangle*, int>>* data) {
+    Visibility v = getVisibility(cam, node->aabb);
+    if (v == FULL) {
+        std::lock_guard<std::mutex> guard(data_mutex);
+        data->push_back(std::pair<triangle*, int>(node->list, node->num));
+        std::cout << "full\n";
+        return true;
+    }
+    else if (v == PARTIAL) {
+        std::cout << "partial\n";
+        if (node->left)
+            getDataThread(cam, node->left, data);
+        if (node->right)
+            getDataThread(cam, node->right, data);
+        if (!node->left && !node->right) {
+            triangle* tmpData = new triangle[node->num];
+            int tmpNum = 0;
+            for (int i = 0; i < node->num; ++i) {
+                if (cam->isVisible(node->list[i].position))
+                    tmpData[tmpNum++] = node->list[i];
+            }
+            triangle* tmpData1 = new triangle[tmpNum];
+            for (int i = 0; i < tmpNum; ++i) {
+                tmpData1[i] = tmpData[i];
+            }
+            delete[] tmpData;
+            std::lock_guard<std::mutex> guard(data_mutex);
+            data->push_back(std::pair<triangle*, int>(tmpData1, tmpNum));
+        }
+    }
+    return false;
+}
+
 class KDTree {
 public:
     KDNode* root;
@@ -108,8 +144,16 @@ public:
     }
     std::pair<triangle*, int> getData(Camera* cam) {
         std::vector<std::pair<triangle*, int>> data;
-        cam->setFOVy(Degree(60));
-        getDataImp(cam, root, data);
+        cam->setFOVy(Degree(60)); //三角形边缘有锯齿，稍微扩大了点视角
+        //getDataImp(cam, root, data);
+        std::thread th1(getDataThread, cam, root->left->left, &data);
+        std::thread th2(getDataThread, cam, root->left->right, &data);
+        std::thread th3(getDataThread, cam, root->right->left, &data);
+        std::thread th4(getDataThread, cam, root->right->right, &data);
+        th1.join();
+        th2.join();
+        th3.join();
+        th4.join();
         std::vector<std::pair<triangle*, int>>::iterator it;
         int tmpNum = 0;
         for (it = data.begin(); it != data.end(); ++it) {
@@ -122,6 +166,7 @@ public:
             tmpHead += it->second;
         }
         cam->setFOVy(Degree(45));
+        //处理data造成的内存泄漏
         return std::pair<triangle*, int>(rtnData, tmpNum);
     }
 private:
@@ -223,17 +268,6 @@ Visibility getVisibility(Camera* cam, const AxisAlignedBox& bound) {
         return PARTIAL;
 }
 
-void trav(KDNode* n) {
-    if (n != nullptr) {
-        if (n->left != nullptr && n->right != nullptr)
-            printf("num:%d\n", n->num);
-        else {
-            trav(n->left);
-            trav(n->right);
-        }
-    }
-}
-
 
 class BasicTutorial1
     : public ApplicationContext
@@ -259,30 +293,32 @@ public:
         camNode->resetOrientation(); camNode->setDirection(front, Node::TS_WORLD);
         camNode->yaw(-Degree(rotateSpeed * x));
         camNode->pitch(-Degree(rotateSpeed * y));
-
+        //Quaternion tmpRotate = Quaternion(-Degree(rotateSpeed * y), Vector3(1, 0, 0)) * Quaternion(-Degree(rotateSpeed * x), Vector3(0, 1, 0));
+        //有待继续修改
+        Vector3 tfront = front, tup = up;
         m_Keyboard->capture();
         if (m_Keyboard->isKeyDown(OIS::KC_ESCAPE)) {
             getRoot()->queueEndRendering();
         }
 
-        float moveSpeed = 50; Vector3 right = front.crossProduct(up);
+        float moveSpeed = 50; Vector3 tright = tfront.crossProduct(tup);
         if (m_Keyboard->isKeyDown(OIS::KC_A)) {
-            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * right);
+            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * tright);
         }
         if (m_Keyboard->isKeyDown(OIS::KC_D)) {
-            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * right);
+            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * tright);
         }
         if (m_Keyboard->isKeyDown(OIS::KC_Q)) {
-            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * up);
+            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * tup);
         }
         if (m_Keyboard->isKeyDown(OIS::KC_E)) {
-            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * up);
+            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * tup);
         }
         if (m_Keyboard->isKeyDown(OIS::KC_W)) {
-            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * front);
+            camNode->setPosition(camNode->getPosition() + moveSpeed * evt.timeSinceLastFrame * tfront);
         }
         if (m_Keyboard->isKeyDown(OIS::KC_S)) {
-            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * front);
+            camNode->setPosition(camNode->getPosition() - moveSpeed * evt.timeSinceLastFrame * tfront);
         }
 
         if (m_Keyboard->isKeyDown(OIS::KC_C)) {
@@ -295,6 +331,7 @@ public:
                     object->textureCoord(p.first[i].node[j].uv);
                 }
             }
+            //处理p中的triangle*造成的内存泄漏
             object->end();
             ogreNode->detachAllObjects();
             ogreNode->attachObject(object);
