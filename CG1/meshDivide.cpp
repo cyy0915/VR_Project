@@ -451,7 +451,7 @@ void BasicTutorial1::setup()
     aiString str;
     scene->mMaterials[scene->mMeshes[0]->mMaterialIndex]->GetTexture(aiTextureType_DIFFUSE, 0, &str);
     //std::string textureFile = std::string("face_obj/")+std::string(str.C_Str());
-    MaterialPtr material = MaterialManager::getSingleton().create("projectFace1", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
+    MaterialPtr material = MaterialManager::getSingleton().create("projectFace", ResourceGroupManager::DEFAULT_RESOURCE_GROUP_NAME);
     material->setReceiveShadows(false);
     Pass* pass = material->getTechnique(0)->getPass(0);
     pass->setLightingEnabled(false);

@@ -36,6 +36,7 @@ share/
 *.vcxproj
 *.vcxproj.filters
 !Pasha_guard_head.obj
+!Centurion_helmet.obj
 
 *.props
 # Visual Studio 2015/2017 cache/options directory
