@@ -18,11 +18,14 @@
 #include <stb_image.h>
 #include <thread>
 #include <mutex>
+#include <queue>
+
+//#define KDTREE_DEBUG
 
 using namespace Ogre;
 using namespace OgreBites;
 
-std::mutex data_mutex;
+std::mutex data_mutex; 
 
 struct pointCloud {
     Vector3 position;
@@ -43,7 +46,7 @@ struct KDNode {
     }
 };
 
-enum Visibility
+enum class Visibility
 {
     NONE,
     PARTIAL,
@@ -65,20 +68,24 @@ bool z_cmp(pointCloud p1, pointCloud p2) {
 
 bool getDataThread(Camera* cam, const KDNode* node, std::vector<std::pair<pointCloud*, int>>* data) {
 	Visibility v = getVisibility(cam, node->aabb);
-	if (v == FULL) {
+	if (v == Visibility::FULL) { //points of this node are all in the view frustum, no need to check its children
         std::lock_guard<std::mutex> guard(data_mutex);
 		data->push_back(std::pair<pointCloud*, int>(node->list, node->num));
-		std::cout << "full\n";
+#ifdef KDTREE_DEBUG
+        std::cout << "full\n";
+#endif // KDTREE_DEBUG
 		return true;
 	}
-	else if (v == PARTIAL) {
+	else if (v == Visibility::PARTIAL) {
+#ifdef KDTREE_DEBUG
 		std::cout << "partial\n";
+#endif // KDTREE_DEBUG
 		if (node->left)
 			getDataThread(cam, node->left, data);
 		if (node->right)
 			getDataThread(cam, node->right, data);
-		if (!node->left && !node->right) {
-			pointCloud* tmpData = new pointCloud[node->num];
+		if (!node->left && !node->right) { //leaf node
+			pointCloud* tmpData = new pointCloud[node->num]; //traverse nodes, check if in the frustum
 			int tmpNum = 0;
 			for (int i = 0; i < node->num; ++i) {
 				if (cam->isVisible(node->list[i].position))
@@ -100,15 +107,15 @@ class KDTree {
 public:
     KDNode* root;
     int maxDepth;
+    int depth; //actual depth
     int maxNumPerBox;
-    int tmpCount;
     pointCloud* list;
     int num;
-    KDTree() : root(nullptr), maxDepth(10), maxNumPerBox(100), tmpCount(0), list(nullptr), num(0) {};
+    KDTree() : root(nullptr), maxDepth(10), maxNumPerBox(100), depth(0), list(nullptr), num(0) {};
     KDTree(pointCloud* list, int num, int maxD = 10, int maxN = 100) {
         maxDepth = maxD;
         maxNumPerBox = maxN;
-        tmpCount = 0;
+        depth = 0;
         this->num = num;
         this->list = new pointCloud[num];
         memcpy(this->list, list, num * sizeof(pointCloud));
@@ -140,18 +147,31 @@ public:
         destroyTree(node->right);
         delete node;
     }
-    std::pair<pointCloud*, int> getData(Camera* cam) {
-        std::vector<std::pair<pointCloud*, int>> data;
-        //cam->setFOVy(Degree(60));
-        //getDataImp(cam, root, data);
-        std::thread th1(getDataThread, cam, root->left->left, &data);
-        std::thread th2(getDataThread, cam, root->left->right, &data);
-        std::thread th3(getDataThread, cam, root->right->left, &data);
-        std::thread th4(getDataThread, cam, root->right->right, &data);
-        th1.join();
-        th2.join();
-        th3.join();
-        th4.join();
+    std::pair<pointCloud*, int> getData(Camera* cam, int threadNum = 4) {
+        std::vector<std::pair<pointCloud*, int>> data; //tmp vector to store the point list, second of pair is the length of each point list
+        if(threadNum <= 1)
+            getDataImp(cam, root, data);
+        else {
+            int tmpDepth = (int)log2(threadNum); //number of threads should be power of 2, if not, convert it to the closest power of 2
+            tmpDepth = tmpDepth < this->depth ? tmpDepth : this->depth;
+            std::queue<std::pair<KDNode*, int>> q;
+            std::vector<KDNode*> threadNodeList;
+            q.push(std::pair<KDNode*, int>(root, 0));
+            while (!q.empty()) { //find tree nodes in tmpDepth
+                std::pair<KDNode*, int> p = q.front();
+                q.pop();
+                if (p.second == tmpDepth)
+                    threadNodeList.push_back(p.first);
+                else {
+                    q.push(std::pair<KDNode*, int>(p.first->left, p.second + 1));
+                    q.push(std::pair<KDNode*, int>(p.first->right, p.second + 1));
+                }
+            }
+            for (auto n : threadNodeList) { //creat threads and join
+                std::thread th(getDataThread, cam, n, &data);
+                th.join();
+            }
+        }
         std::vector<std::pair<pointCloud*, int>>::iterator it;
         int tmpNum = 0;
         for (it = data.begin(); it != data.end(); ++it) {
@@ -172,7 +192,7 @@ private:
         node->list = list;
         node->num = num;
         node->aabb = box;
-        tmpCount++;
+        this->depth = depth;
         if (depth >= maxDepth || num < maxNumPerBox) {
             node->left = node->right = nullptr;
             return true;
@@ -208,13 +228,17 @@ private:
     }
     bool getDataImp(Camera* cam, const KDNode* node, std::vector<std::pair<pointCloud*, int>>& data) {
         Visibility v = getVisibility(cam, node->aabb);
-        if (v == FULL) {
+        if (v == Visibility::FULL) {
             data.push_back(std::pair<pointCloud*, int>(node->list, node->num));
+#ifdef KDTREE_DEBUG
             std::cout << "full\n";
+#endif // KDTREE_DEBUG
             return true;
         }
-        else if (v == PARTIAL) {
-            std::cout << "partial\n";
+        else if (v == Visibility::PARTIAL) {
+#ifdef KDTREE_DEBUG
+            std::cout << "parital\n";
+#endif // KDTREE_DEBUG
             if (node->left)
                 getDataImp(cam, node->left, data);
             if (node->right)
@@ -241,7 +265,7 @@ private:
 
 Visibility getVisibility(Camera* cam, const AxisAlignedBox& bound) {
     if (bound.isNull())
-        return NONE;
+        return Visibility::NONE;
     Vector3 center = bound.getCenter();
     Vector3 halfSize = bound.getHalfSize();
 
@@ -254,15 +278,15 @@ Visibility getVisibility(Camera* cam, const AxisAlignedBox& bound) {
         Plane::Side side = cam->getFrustumPlane(plane).getSide(bound);
 
         if (side == Plane::NEGATIVE_SIDE)
-            return NONE;
+            return Visibility::NONE;
         if (side == Plane::BOTH_SIDE)
             all_inside = false;
     }
 
     if (all_inside)
-        return FULL;
+        return Visibility::FULL;
     else
-        return PARTIAL;
+        return Visibility::PARTIAL;
 }
 
 class BasicTutorial1
