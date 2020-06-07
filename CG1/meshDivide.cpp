@@ -293,9 +293,10 @@ public:
         camNode->resetOrientation(); camNode->setDirection(front, Node::TS_WORLD);
         camNode->yaw(-Degree(rotateSpeed * x));
         camNode->pitch(-Degree(rotateSpeed * y));
-        //Quaternion tmpRotate = Quaternion(-Degree(rotateSpeed * y), Vector3(1, 0, 0)) * Quaternion(-Degree(rotateSpeed * x), Vector3(0, 1, 0));
-        //ÓÐ´ý¼ÌÐøÐÞ¸Ä
-        Vector3 tfront = front, tup = up;
+        Quaternion xRotate = Quaternion(-Degree(rotateSpeed * x), up);
+        Vector3 right = front.crossProduct(up);
+        Quaternion yRotate = Quaternion(-Degree(rotateSpeed * y), xRotate * right);
+        Vector3 tfront = yRotate*xRotate*front, tup = yRotate*xRotate * up;
         m_Keyboard->capture();
         if (m_Keyboard->isKeyDown(OIS::KC_ESCAPE)) {
             getRoot()->queueEndRendering();
