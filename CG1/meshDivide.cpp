@@ -280,24 +280,42 @@ public:
     void setup();
     bool frameStarted(const FrameEvent& evt) {
         ApplicationContext::frameStarted(evt);
+        //帧时间
         count = (count + 1) % 60;
         if (count == 0) {
             time = getRoot()->getTimer()->getMilliseconds();
         }
 
         m_Mouse->capture();
+        m_Keyboard->capture();
         OIS::MouseState mousePos = m_Mouse->getMouseState();
-
-        x += mousePos.X.rel; y += mousePos.Y.rel;
         float rotateSpeed = 90 / 300.0;
-        camNode->resetOrientation(); camNode->setDirection(front, Node::TS_WORLD);
-        camNode->yaw(-Degree(rotateSpeed * x));
-        camNode->pitch(-Degree(rotateSpeed * y));
+
+        if (mousePos.buttonDown(OIS::MB_Left)){
+            float rx = mousePos.X.rel, ry = mousePos.Y.rel;
+            //不跟随front和up的代码
+            Quaternion camRotate = Quaternion(Degree(rotateSpeed * Math::Sqrt(rx * rx + ry * ry)), Vector3(-ry, 0, -rx));
+            //
+            camNode->setOrientation(viewCenter);
+            camNode->setPosition(camRotate * camNode->getPosition());
+            camNode->rotate(camRotate, Node::TS_WORLD);
+            viewCenter = camNode->getOrientation();
+            front = camRotate * front;
+            up = camRotate * up;
+            //camNode->rotate(camRotate, Node::TS_WORLD);
+        }
+        else {
+            x += mousePos.X.rel; y += mousePos.Y.rel;
+            camNode->setOrientation(viewCenter); camNode->setDirection(front, Node::TS_WORLD);
+            camNode->yaw(-Degree(rotateSpeed * x));
+            camNode->pitch(-Degree(rotateSpeed * y));
+        }
+        
         Quaternion xRotate = Quaternion(-Degree(rotateSpeed * x), up);
         Vector3 right = front.crossProduct(up);
         Quaternion yRotate = Quaternion(-Degree(rotateSpeed * y), xRotate * right);
         Vector3 tfront = yRotate*xRotate*front, tup = yRotate*xRotate * up;
-        m_Keyboard->capture();
+        
         if (m_Keyboard->isKeyDown(OIS::KC_ESCAPE)) {
             getRoot()->queueEndRendering();
         }
@@ -364,6 +382,7 @@ private:
     Vector3 front, up;
     ManualObject* object;
     KDTree* kdTree;
+    Quaternion viewCenter;
 };
 
 
@@ -399,6 +418,7 @@ void BasicTutorial1::setup()
     camNode->setPosition(camPos);
     camNode->setDirection(Vector3(0, 1, 0), Node::TS_WORLD);
     camNode->setInitialState();
+    viewCenter = camNode->getOrientation();
     front = Vector3(0, 1, 0); up = Vector3(0, 0, 1);
 
     // and tell it to render into the main window
